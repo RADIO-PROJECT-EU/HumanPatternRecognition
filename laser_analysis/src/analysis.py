@@ -7,6 +7,7 @@ import pickle
 from skimage.feature import hog
 from laser_clustering.msg import ClustersMsg
 from laser_analysis.msg import Analysis4MetersMsg
+from laser_analysis.msg import HumanPredictionMsg
 import rospkg, math
 import walk_track as wt 
 import csv
@@ -18,6 +19,7 @@ speed_ = 5;#human walking speed in km/h
 z_scale = float(speed_*dt) / float(3600)
 Classifier = None
 results4meters_publisher = None
+results4scans_publisher = None
 scan_parts = 5
 cluster_parts = 4
 timewindow = 40
@@ -38,9 +40,11 @@ pca_obj = PCA()
 walkTrack = []
 hum_id = 0
 
+frames_array = []
+
 
 def init():
-    global results4meters_publisher, frame_id, Classifier, publish_viz, viz_publisher
+    global results4meters_publisher, results4scans_publisher, frame_id, Classifier, publish_viz, viz_publisher
     global dt, speed_, z_scale
     global timewindow, distance
     global stat_file, writeToFile
@@ -50,6 +54,7 @@ def init():
 
     input_clusters_topic = rospy.get_param('~input_clusters_topic','laser_clustering/clusters')
     results4meters_topic = rospy.get_param('~results4meters_topic','~results4meters')
+    results4scans_topic = rospy.get_param('~results4scans_topic','~results4scans')
     frame_id = rospy.get_param('~frame_id','laser_link')
     classifier_file = rospy.get_param('~classifier_file','LDA_classifier.p')
     publish_viz = rospy.get_param('~publish_viz', False)
@@ -78,10 +83,12 @@ def init():
     
 
 
-    rospy.Subscriber(input_clusters_topic, ClustersMsg, analysis)
-    #rospy.Subscriber(input_clusters_topic, ClustersMsg, cluster_analysis)
+    #rospy.Subscriber(input_clusters_topic, ClustersMsg, analysis)
+    rospy.Subscriber(input_clusters_topic, ClustersMsg, cluster_analysis)
 
     results4meters_publisher = rospy.Publisher(results4meters_topic, Analysis4MetersMsg, queue_size=10)
+
+    results4scans_publisher = rospy.Publisher(results4scans_topic, HumanPredictionMsg, queue_size=10)
 
 
     if publish_viz:
@@ -224,7 +231,7 @@ def analysis(clusters_msg):
             
         prev_index_walk = array_sizes[i] - 1
 
-	# it takes only the last part-cluster bc the previous clusters where computed before (slice-window mode).
+        # it takes only the last part-cluster bc the previous clusters where computed before (slice-window mode).
         if human_predict(xk,yk,zk) == 1:
             walk_analysis(xCl, yCl, i)
         else:
@@ -250,6 +257,7 @@ def cluster_analysis(clusters_msg):
     global seconds,prev_sec
     global scan_time, timestamp
     global walkTrack, hum_id
+    global frames_array
 
     xi = np.array(clusters_msg.x)
     yi = np.array(clusters_msg.y)
@@ -263,6 +271,7 @@ def cluster_analysis(clusters_msg):
 
     array_sizes = np.array(clusters_msg.array_sizes)
     num_clusters = np.array(clusters_msg.num_clusters)
+    frames_array = clusters_msg.frames
     
     cnt=0
     prev_index = 0
@@ -295,7 +304,8 @@ def cluster_analysis(clusters_msg):
                         del walkTrack[len(walkTrack)-1]
                     else:
                         pos = np.where(array_sizes == sumV)[0]
-                        del walkTrack[pos+ (k+1)]
+                        print 'pos = {} , k = {}'.format(pos,k)
+                        del walkTrack[pos[0]+ (k+1)]
                         sumV = 0
 
             if sumV == array_sizes[k]:
@@ -338,7 +348,7 @@ def cluster_analysis(clusters_msg):
             xCl.append(xi[j])
             yCl.append(yi[j])
             zCl.append(zi[j])
-           
+            
             #it is a cluster (part of traced one)
             if len(xCl)-1 == num_clusters[cl_index]-1:
                 if newCluster:
@@ -347,6 +357,7 @@ def cluster_analysis(clusters_msg):
                     if human_predict(xCl,yCl,zCl) == 1:
                         walk_analysis(xCl, yCl, i)
                         walkTrack[i].set_stable(False)
+                        back2scans(xCl, yCl, zCl, i, True)
                     else:
                         if walkTrack[i].is_stable():
                             walkTrack[i].initialise()
@@ -354,6 +365,7 @@ def cluster_analysis(clusters_msg):
                             walk_analysis(xCl, yCl, i)
 
                         walkTrack[i].set_stable(True)
+                        back2scans(xCl, yCl, zCl, i, False)
                 cl_index += 1
                 tot_sum = tot_sum +len(xCl)
                 xCl = []
@@ -363,10 +375,10 @@ def cluster_analysis(clusters_msg):
             
         prev_index_walk = array_sizes[i] - 1
 
-	# it takes only the last part-cluster bc the previous clusters where computed before (slice-window mode).
-        
+        # it takes only the last part-cluster bc the previous clusters where computed before (slice-window mode).       
         if human_predict(xCl,yCl,zCl) == 1:
             walk_analysis(xCl, yCl, i)
+            back2scans(xCl, yCl, zCl, i, True)
         else:
             if walkTrack[i].is_stable():
                 walkTrack[i].initialise()
@@ -374,6 +386,8 @@ def cluster_analysis(clusters_msg):
                 walk_analysis(xCl, yCl, i)
 
             walkTrack[i].set_stable(True)
+
+            back2scans(xCl, yCl, zCl, i, False)
         
         tot_sum -= 1
    
@@ -382,8 +396,44 @@ def cluster_analysis(clusters_msg):
             #TODO publish required arrays
             print 'test'
 
+#Publish the recognition decision, and the mean point for each scan 
+def back2scans(x, y, z, obj_id, is_human):
+    global results4scans_publisher, frames_array, z_scale
 
-#Recognition whether a traced_cluster is following a pattern of a human walk or not.
+    z_angle = z[0]
+
+    while z_angle <= z[len(z)-1]:
+        z_filter = np.where(z==z_angle) #get the positions that have the same z_angle
+
+        xk = []
+        yk = []
+        zk = []
+        for i, ind in enumerate(z_filter[0]):
+            xk.append(x[ind])
+            yk.append(y[ind])
+            zk.append(z[ind])
+
+        hpr_msg = HumanPredictionMsg()
+        hpr_msg.header.stamp = rospy.Time.now()
+        hpr_msg.header.frame_id = frame_id
+        hpr_msg.x = np.mean(xk)      #mean x
+        hpr_msg.y = np.mean(yk)      #mean y -> mean point (mean_x,mean_y)
+        hpr_msg.z = zk[0]
+        hpr_msg.frame_seq = frames_array[0]
+        hpr_msg.is_human = is_human
+        hpr_msg.object_id = obj_id
+
+        results4scans_publisher.publish(hpr_msg)
+
+        #get the next z value and terminate if there is no other
+        ind = z_filter[0][len(z_filter[0]) - 1] + 1
+        if ind <= (len(z) -1):
+            z_angle = z[ind]
+        else:
+            break
+
+
+#Recognise whether a traced_cluster is following a pattern of a human walk or not.
 #Steps:
 #    - align each traced_cluster regarding the variances of each dimension
 #    - gridfit each aligned cluster -> becomes an image
@@ -409,7 +459,7 @@ def human_predict(x, y, z):
     alignment_result=[[sum(a*b for a,b in zip(X_row,Y_col)) for X_row in zip(*[xnew,ynew,znew])] for Y_col in U]
     alignment_result=multiply_array(xnew,ynew,znew, V)
 
-    grid=gridfit(alignment_result[0], alignment_result[1], alignment_result[2], 16, 16) #extract surface - y,z,x alignment_result[1]
+    grid=gridfit(alignment_result[1], alignment_result[2], alignment_result[0], 16, 16) #extract surface - y,z,x alignment_result[1]
 
     grid=grid-np.amin(grid)
 
@@ -427,8 +477,8 @@ def human_predict(x, y, z):
             temp.append(np.array(hogs[k]))
 
 
-    #temp_pca = pca_obj.transform(temp)
-    results = Classifier.predict(temp)
+    temp_pca = pca_obj.transform(temp)
+    results = Classifier.predict(temp_pca)
     print 'predicted result = ',results
 
     return results[0]
@@ -463,7 +513,7 @@ def walk_analysis(x, y, pos):
     if split == 0:
         return
 
-    while split_count <= len(x):
+    while split_count < len(x):
         xmed = np.median(x[split_count:split_count+split])
         ymed = np.median(y[split_count:split_count+split])
 
@@ -494,13 +544,13 @@ def walk_analysis(x, y, pos):
 
         if human.get_distance() >= distance:
             print '\n*****\nHuman {} walked {} meters in {} seconds\n*****\n'.format(human.get_id(), human.get_distance(), human.get_time())
-	    analysis4meters_msg = Analysis4MetersMsg()
+            analysis4meters_msg = Analysis4MetersMsg()
             analysis4meters_msg.header.stamp = rospy.Time.now()
             analysis4meters_msg.header.frame_id = frame_id
-	    analysis4meters_msg.human_id = human.get_id()
-	    analysis4meters_msg.time_needed = human.get_time()
-	    analysis4meters_msg.distance = human.get_distance()
-	    results4meters_publisher.publish(analysis4meters_msg)
+            analysis4meters_msg.human_id = human.get_id()
+            analysis4meters_msg.time_needed = human.get_time()
+            analysis4meters_msg.distance = human.get_distance()
+            results4meters_publisher.publish(analysis4meters_msg)
             if writeToFile:
                 write_results(pos)
             human.initialise()
