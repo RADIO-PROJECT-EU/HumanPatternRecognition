@@ -3,6 +3,7 @@ import roslib, rospy
 import numpy as np
 import scipy.spatial.distance as dist
 from laser_clustering.msg import ClustersMsg
+from radio_services.srv import InstructionWithAnswer
 
 trace_array = []
 trace_count = False
@@ -28,9 +29,13 @@ dt = 25;#period in ms (dt between scans)
 speed_ = 5;#human walking speed in km/h
 z_scale = float(speed_*dt) / float(3600)
 
+running = False
+clustering_sub = None
+input_clusters_topic = ''
 
 def init():
     global clusters_publisher, frame_id, dt, speed_, z_scale
+    global running, clustering_sub, input_clusters_topic
 
     rospy.init_node('laser_overlap_trace')
 
@@ -39,10 +44,14 @@ def init():
     frame_id = rospy.get_param('~frame_id','laser_link')
     dt = rospy.get_param('~dt', 25)
     speed_ = rospy.get_param('~human_speed', 5)
+    running = rospy.get_param('~run_on_startup', False)
 
     z_scale = float(speed_*dt) / float(3600)
-   
-    rospy.Subscriber(input_clusters_topic, ClustersMsg, overlap_trace)
+
+    rospy.Service('/human_pattern_recognition/laser_overlap_trace/node_state_service', InstructionWithAnswer, nodeStateCallback)
+
+    if running:
+        clustering_sub = rospy.Subscriber(input_clusters_topic, ClustersMsg, overlap_trace)
 
     clusters_publisher = rospy.Publisher(output_clusters_topic, ClustersMsg, queue_size=10)
     while not rospy.is_shutdown():
@@ -373,7 +382,39 @@ def getClusterSet():
 
     return final_clusters, index_clusters
 
-
+##
+## @brief      This function is called when the corresponding service is called
+##             and based on the parameter passed, either changes its state and
+##             returns the new state, or just returns the current state.
+##             0: Change the current node state to WAITING (false) and return the current node state.
+##             1: Change the current node state to RUNNING (true), return the current node state (and do not change the mode).
+##            -1: Return the current node state.
+##
+## @param      req   The requested action
+##
+## @return     The current state of the node
+##
+def nodeStateCallback(req):
+    global running, clustering_sub, input_clusters_topic
+    global trace_array, trace_count, trace_results, cls_results
+    global traced_clusters, num_clusters, max_cls, first_trace
+    if req.command == 0 and running:
+        running = False
+        clustering_sub.unregister()
+        print 'Stopped laser overlap trace!'
+    elif req.command == 1 and not running:
+        running = True
+        trace_array = []
+        trace_count = False
+        trace_results = []
+        cls_results = []
+        traced_clusters = []
+        num_clusters = []
+        max_cls = 0
+        first_trace = True
+        clustering_sub = rospy.Subscriber(input_clusters_topic, ClustersMsg, overlap_trace)
+        print 'Started laser overlap trace!'
+    return running
 
 if __name__ == '__main__':
     init() 

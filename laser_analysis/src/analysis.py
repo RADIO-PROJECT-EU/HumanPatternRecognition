@@ -12,6 +12,7 @@ import rospkg, math
 import walk_track as wt 
 import csv
 from sklearn.decomposition import PCA
+from radio_services.srv import InstructionWithAnswer
 
 z = 0
 dt = 25;#period in ms (dt between scans)
@@ -42,6 +43,9 @@ hum_id = 0
 
 frames_array = []
 
+running = False
+clustering_sub = None
+input_clusters_topic = ''
 
 def init():
     global results4meters_publisher, results4scans_publisher, frame_id, Classifier, publish_viz, viz_publisher
@@ -49,6 +53,7 @@ def init():
     global timewindow, distance
     global stat_file, writeToFile
     global pca_obj
+    global running, clustering_sub, input_clusters_topic
 
     rospy.init_node('laser_analysis')
 
@@ -66,12 +71,14 @@ def init():
     writeToFile = rospy.get_param('~write_to_file', False)
     stat_file = rospy.get_param('~file', '/home/hprStats.csv')
     pca_file = rospy.get_param('~pca_file','/home/myPCA.p')
+    running = rospy.get_param('~run_on_startup', False)
 
 
     print input_clusters_topic
 
     z_scale = float(speed_*dt) / float(3600)
 
+    rospy.Service('/human_pattern_recognition/laser_analysis/node_state_service', InstructionWithAnswer, nodeStateCallback)
 
     rospack = rospkg.RosPack()
 
@@ -84,7 +91,8 @@ def init():
 
 
     #rospy.Subscriber(input_clusters_topic, ClustersMsg, analysis)
-    rospy.Subscriber(input_clusters_topic, ClustersMsg, cluster_analysis)
+    if running:
+        clustering_sub = rospy.Subscriber(input_clusters_topic, ClustersMsg, cluster_analysis)
 
     results4meters_publisher = rospy.Publisher(results4meters_topic, Analysis4MetersMsg, queue_size=10)
 
@@ -654,6 +662,39 @@ def multiply_array(x,y,z, V) :
         new_z.append(x[i]*V[2][0] + y[i]*V[2][1] + z[i]*V[2][2])
 
     return [new_x,new_y,new_z]
+
+##
+## @brief      This function is called when the corresponding service is called
+##             and based on the parameter passed, either changes its state and
+##             returns the new state, or just returns the current state.
+##             0: Change the current node state to WAITING (false) and return the current node state.
+##             1: Change the current node state to RUNNING (true), return the current node state (and do not change the mode).
+##            -1: Return the current node state.
+##
+## @param      req   The requested action
+##
+## @return     The current state of the node
+##
+def nodeStateCallback(req):
+    global running, clustering_sub, input_clusters_topic
+    global scan_time, timestamp, dt_ratio, walkTrack
+    global hum_id, frames_array
+    if req.command == 0 and running:
+        running = False
+        clustering_sub.unregister()
+        print 'Stopped laser analysis!'
+    elif req.command == 1 and not running:
+        running = True
+        scan_time = 0.0
+        timestamp = 0.0
+        dt_ratio = 1.0
+        walkTrack = []
+        hum_id = 0
+        frames_array = []
+        clustering_sub = rospy.Subscriber(input_clusters_topic, ClustersMsg, cluster_analysis)
+        print 'Started laser analysis!'
+    return running
+
 
 
 

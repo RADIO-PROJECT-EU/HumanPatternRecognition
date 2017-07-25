@@ -46,6 +46,7 @@
   <build_depend>message_generation</build_depend>
   <build_depend>laser_wall_extraction</build_depend>
   <build_depend>laser_clustering</build_depend>
+  <build_depend>radio_services</build_depend>
 
   <run_depend>laser_wall_extraction</run_depend>
   <run_depend>laser_clustering</run_depend>
@@ -53,6 +54,7 @@
   <run_depend>message_runtime</run_depend>
   <run_depend>roslib</run_depend>
   <run_depend>std_msgs</run_depend>
+  <run_depend>radio_services</run_depend>
 
 
   <!-- The export tag contains other, unspecified, tags -->

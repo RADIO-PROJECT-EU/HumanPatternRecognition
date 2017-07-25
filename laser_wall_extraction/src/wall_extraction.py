@@ -5,6 +5,7 @@ import csv
 from sensor_msgs.msg import LaserScan
 from laser_wall_extraction.msg import BufferMsg
 from laser_wall_extraction.msg import WallVizMsg
+from radio_services.srv import InstructionWithAnswer
 
 
 wall_flag = 0
@@ -39,11 +40,13 @@ state = 0  #denotes which frames we ll keep
 
 ###############################################
 
-
+running = False
+scan_sub = None
+scan_topic = ''
 
 def init():
     global range_limit, timewindow, use_overlap, buffer_publisher, frame_id, dt, speed_, z_scale
-    global publish_viz, viz_publisher
+    global publish_viz, viz_publisher, running, scan_sub, scan_topic
 
     rospy.init_node('laser_wall_extraction')
 
@@ -57,12 +60,16 @@ def init():
     speed_ = rospy.get_param('~human_speed', 5)
     publish_viz = rospy.get_param('~publish_viz', False)
     viz_topic = rospy.get_param('~viz_topic', "~viz_req")
+    running = rospy.get_param('~run_on_startup', False)
 
     z_scale = float(speed_*dt) / float(3600)
 
     print 'z scale = ',z_scale 
 
-    rospy.Subscriber(scan_topic, LaserScan, wall_extraction)
+    rospy.Service('/human_pattern_recognition/laser_wall_extraction/node_state_service', InstructionWithAnswer, nodeStateCallback)
+
+    if running:
+        scan_sub = rospy.Subscriber(scan_topic, LaserScan, wall_extraction)
 
     buffer_publisher = rospy.Publisher(buffer_topic, BufferMsg, queue_size=10)
     
@@ -211,6 +218,74 @@ def wall_extraction(laser_data):
                 #z_end = 0
 
         state = state + 1
+
+##
+## @brief      This function is called when the corresponding service is called
+##             and based on the parameter passed, either changes its state and
+##             returns the new state, or just returns the current state.
+##             0: Change the current node state to WAITING (false) and return the current node state.
+##             1: Change the current node state to RUNNING (true), return the current node state (and do not change the mode).
+##            -1: Return the current node state.
+##
+## @param      req   The requested action
+##
+## @return     The current state of the node
+##
+def nodeStateCallback(req):
+    global running, scan_sub, scan_topic
+    global wall_flag, w_index, fr_index, z
+    global z_end, overlap_part, frames_array, use_overlap
+    # TODO use the response! (for now I just print it!)
+    if req.command == 0 and running:
+        running = False
+        scan_sub.unregister()
+        print 'Stopped laser wall extraction!'
+        rospy.wait_for_service('/human_pattern_recognition/laser_clustering/node_state_service')
+        try:
+            node_state_service = rospy.ServiceProxy('/human_pattern_recognition/laser_clustering/node_state_service', InstructionWithAnswer)
+            req = False
+            res = node_state_service(req)
+            print res
+            if use_overlap:
+                rospy.wait_for_service('/human_pattern_recognition/laser_overlap_trace/node_state_service')
+                node_state_service = rospy.ServiceProxy('/human_pattern_recognition/laser_overlap_trace/node_state_service', InstructionWithAnswer)
+                res = node_state_service(req)
+                print res
+            rospy.wait_for_service('/human_pattern_recognition/laser_analysis/node_state_service')
+            node_state_service = rospy.ServiceProxy('/human_pattern_recognition/laser_analysis/node_state_service', InstructionWithAnswer)
+            res = node_state_service(req)
+            print res
+        except rospy.ServiceException, e:
+            print "Service call failed: %s"%e
+    elif req.command == 1 and not running:
+        running = True
+        wall_flag = 0
+        w_index = 0
+        fr_index = 1
+        z = 0
+        z_end = 0.0
+        overlap_part = []
+        frames_array = []
+        scan_sub = rospy.Subscriber(scan_topic, LaserScan, wall_extraction)
+        print 'Started laser wall extraction!'
+        rospy.wait_for_service('/human_pattern_recognition/laser_clustering/node_state_service')
+        try:
+            node_state_service = rospy.ServiceProxy('/human_pattern_recognition/laser_clustering/node_state_service', InstructionWithAnswer)
+            req = True
+            res = node_state_service(req)
+            print res
+            if use_overlap:
+                rospy.wait_for_service('/human_pattern_recognition/laser_overlap_trace/node_state_service')
+                node_state_service = rospy.ServiceProxy('/human_pattern_recognition/laser_overlap_trace/node_state_service', InstructionWithAnswer)
+                res = node_state_service(req)
+                print res
+            rospy.wait_for_service('/human_pattern_recognition/laser_analysis/node_state_service')
+            node_state_service = rospy.ServiceProxy('/human_pattern_recognition/laser_analysis/node_state_service', InstructionWithAnswer)
+            res = node_state_service(req)
+            print res
+        except rospy.ServiceException, e:
+            print "Service call failed: %s"%e
+    return running
 
 
 #convert polar coordinates to cartesian

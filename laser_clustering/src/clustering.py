@@ -7,6 +7,7 @@ import online_clustering as oncl
 from laser_wall_extraction.msg import BufferMsg
 from laser_clustering.msg import ClustersMsg
 from laser_clustering.msg import ClusterLabelsMsg
+from radio_services.srv import InstructionWithAnswer
 
 buffer_topic = ''
 num_c = 3
@@ -15,10 +16,14 @@ frame_id = ''
 publish_cluster_labels = False
 cluster_labels_publisher = None
 use_overlap = False
+running = False
+wall_sub = None
+buffer_topic = ''
 
 def init():
     global num_c, buffer_topic, clusters_publisher, frame_id, use_overlap
     global publish_cluster_labels, cluster_labels_publisher
+    global running, wall_sub, buffer_topic
 
     rospy.init_node('laser_clustering')
 
@@ -29,8 +34,12 @@ def init():
     publish_cluster_labels = rospy.get_param('~publish_cluster_labels', False)
     use_overlap = rospy.get_param('~use_overlap', True)
     cluster_labels_topic = rospy.get_param('~cluster_labels_topic', '~cluster_labels')
+    running = rospy.get_param('~run_on_startup', False)
 
-    rospy.Subscriber(buffer_topic, BufferMsg, clustering_procedure)
+    wall_sub = rospy.Service('/human_pattern_recognition/laser_clustering/node_state_service', InstructionWithAnswer, nodeStateCallback)
+
+    if running:
+        wall_sub = rospy.Subscriber(buffer_topic, BufferMsg, clustering_procedure)
 
     clusters_publisher = rospy.Publisher(clusters_topic, ClustersMsg, queue_size=10)
     if publish_cluster_labels:
@@ -136,6 +145,31 @@ def clustering_procedure(buffer):
             clusterlabelsmsg.header = clustersmsg.header
             clusterlabelsmsg.cluster_labels = cluster_labels
             cluster_labels_publisher.publish(clusterlabelsmsg)
+
+##
+## @brief      This function is called when the corresponding service is called
+##             and based on the parameter passed, either changes its state and
+##             returns the new state, or just returns the current state.
+##             0: Change the current node state to WAITING (false) and return the current node state.
+##             1: Change the current node state to RUNNING (true), return the current node state (and do not change the mode).
+##            -1: Return the current node state.
+##
+## @param      req   The requested action
+##
+## @return     The current state of the node
+##
+def nodeStateCallback(req):
+    global running, wall_sub, buffer_topic
+    if req.command == 0 and running:
+        running = False
+        wall_sub.unregister()
+        print 'Stopped laser clustering!'
+    elif req.command == 1 and not running:
+        running = True
+        wall_sub = rospy.Subscriber(buffer_topic, BufferMsg, clustering_procedure)
+        print 'Started laser clustering!'
+    return running
+
 
 if __name__ == '__main__':
     init()   
