@@ -44,12 +44,14 @@
   <build_depend>roslib</build_depend>
   <build_depend>sensor_msgs</build_depend>
   <build_depend>message_generation</build_depend>
+  <build_depend>radio_services</build_depend>
   
   <run_depend>message_generation</run_depend>
   <run_depend>message_runtime</run_depend>
   <run_depend>roslib</run_depend>
   <run_depend>boost</run_depend>
   <run_depend>std_msgs</run_depend>
+  <run_depend>radio_services</run_depend>
 
 
   <!-- The export tag contains other, unspecified, tags -->
