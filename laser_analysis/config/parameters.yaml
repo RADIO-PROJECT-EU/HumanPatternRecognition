@@ -11,6 +11,7 @@ viz_topic: "~viz_req"
 dt: 25
 human_speed: 5
 distance: 4
+min_distance: 1
 timewindow: 40
 write_to_file: True
 file: '/home/ros/Desktop/statNB.csv' #'/media/sf_new_shared/fhag_bags/hprResults/stat_10'

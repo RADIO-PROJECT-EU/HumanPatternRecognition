@@ -34,6 +34,7 @@ scan_time = 0.0
 timestamp = 0.0
 dt_ratio = 1.0
 pca_obj = PCA()
+min_distance = 1
 
 #list_of<WalkTrack>: 
 #It contains information about the walk statistics (distance in meters, time for that distance) for each traced_cluster.
@@ -53,7 +54,7 @@ def init():
     global timewindow, distance
     global stat_file, writeToFile
     global pca_obj
-    global running, clustering_sub, input_clusters_topic
+    global running, clustering_sub, input_clusters_topic, min_distance
 
     rospy.init_node('laser_analysis')
 
@@ -68,6 +69,7 @@ def init():
     speed_ = rospy.get_param('~human_speed', 5)
     timewindow = rospy.get_param('~timewindow', 40)
     distance = rospy.get_param('~distance', 4)
+    min_distance = rospy.get_param('~min_distance', 1)
     writeToFile = rospy.get_param('~write_to_file', False)
     stat_file = rospy.get_param('~file', '/home/hprStats.csv')
     pca_file = rospy.get_param('~pca_file','/home/myPCA.p')
@@ -174,7 +176,7 @@ def analysis(clusters_msg):
             if sumV == array_sizes[k]:
                 k = k + 1
                 sumV = 0
-		    
+            
             sumV += num_clusters[j]
 
         num_clusters = num_clusters[num_clusters != 0]
@@ -319,7 +321,7 @@ def cluster_analysis(clusters_msg):
             if sumV == array_sizes[k]:
                 k = k + 1
                 sumV = 0
-		    
+            
             sumV += num_clusters[j]
 
         num_clusters = num_clusters[num_clusters != 0]
@@ -508,6 +510,7 @@ def walk_analysis(x, y, pos):
     global timewindow, scan_time, distance, timestamp, cluster_parts
     global walkTrack, writeToFile, frame_id, results4meters_publisher
     global dt_ratio
+    global min_distance
 
     split = len(x)/cluster_parts
     split_count = 0
@@ -541,7 +544,7 @@ def walk_analysis(x, y, pos):
 
         else:
             human.set_timestamp(timestamp)
-	
+    
         human.set_prevMedian(xmed, ymed)
         human.set_time(time_increment)
 
@@ -550,18 +553,21 @@ def walk_analysis(x, y, pos):
 
         split_count += split
 
-        if human.get_distance() >= distance:
+        if human.get_distance() >= distance or human.get_distance() > min_distance:
             print '\n*****\nHuman {} walked {} meters in {} seconds\n*****\n'.format(human.get_id(), human.get_distance(), human.get_time())
             analysis4meters_msg = Analysis4MetersMsg()
             analysis4meters_msg.header.stamp = rospy.Time.now()
             analysis4meters_msg.header.frame_id = frame_id
             analysis4meters_msg.human_id = human.get_id()
-            analysis4meters_msg.time_needed = human.get_time()
+
+            analysis4meters_msg.time_needed = human.get_time() * distance / human.get_distance()
+
             analysis4meters_msg.distance = human.get_distance()
             results4meters_publisher.publish(analysis4meters_msg)
             if writeToFile:
                 write_results(pos)
-            human.initialise()
+            if human.get_distance() >= distance:
+                human.initialise()
 
 
 def write_results(pos):
