@@ -246,6 +246,13 @@ def nodeStateCallback(req):
             node_state_service = rospy.ServiceProxy('/human_pattern_recognition/laser_analysis/node_state_service', InstructionWithAnswer)
             res = node_state_service(req)
             print res
+            wall_flag = 0
+            w_index = 0
+            fr_index = 1
+            z = 0
+            z_end = 0.0
+            overlap_part = []
+            frames_array = []
         except rospy.ServiceException, e:
             print "Service call failed: %s"%e
     elif req.command == 1 and not running:

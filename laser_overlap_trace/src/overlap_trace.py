@@ -398,11 +398,8 @@ def nodeStateCallback(req):
     global trace_array, trace_count, trace_results, cls_results
     global traced_clusters, num_clusters, max_cls, first_trace
     if req.command == 0 and running:
-        running = False
         clustering_sub.unregister()
-        print 'Stopped laser overlap trace!'
-    elif req.command == 1 and not running:
-        running = True
+        running = False
         trace_array = []
         trace_count = False
         trace_results = []
@@ -411,6 +408,9 @@ def nodeStateCallback(req):
         num_clusters = []
         max_cls = 0
         first_trace = True
+        print 'Stopped laser overlap trace!'
+    elif req.command == 1 and not running:
+        running = True
         clustering_sub = rospy.Subscriber(input_clusters_topic, ClustersMsg, overlap_trace)
         print 'Started laser overlap trace!'
     return running

@@ -636,17 +636,17 @@ def nodeStateCallback(req):
     global scan_time, timestamp, dt_ratio, walkTrack
     global hum_id, frames_array
     if req.command == 0 and running:
-        running = False
         clustering_sub.unregister()
-        print 'Stopped laser analysis!'
-    elif req.command == 1 and not running:
-        running = True
+        running = False
         scan_time = 0.0
         timestamp = 0.0
         dt_ratio = 1.0
         walkTrack = []
         hum_id = 0
         frames_array = []
+        print 'Stopped laser analysis!'
+    elif req.command == 1 and not running:
+        running = True
         clustering_sub = rospy.Subscriber(input_clusters_topic, ClustersMsg, cluster_analysis)
         print 'Started laser analysis!'
     return running

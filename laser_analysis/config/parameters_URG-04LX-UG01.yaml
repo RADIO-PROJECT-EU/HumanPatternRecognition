@@ -10,7 +10,7 @@ viz_topic: "~viz_req"
 dt: 50
 human_speed: 5
 distance: 1
-min_distance: 0.5
+min_distance: 1
 timewindow: 20
 write_to_file: False
 file: '/home/rosturtle/Desktop/URG04stats.csv'
